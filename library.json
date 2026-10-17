@@ -1,0 +1,30 @@
+{
+  "lists": {
+    "Favorites": [],
+    "Testing testing": [
+      "www.cookbooks.com/Recipe-Details.aspx?id=864311"
+    ]
+  },
+  "recipes": {
+    "www.cookbooks.com/Recipe-Details.aspx?id=864311": {
+      "id": "www.cookbooks.com/Recipe-Details.aspx?id=864311",
+      "title": "Creamed Chicken",
+      "link": "www.cookbooks.com/Recipe-Details.aspx?id=864311",
+      "ingredients": [
+        "3 lb. whole chicken",
+        "water to cover",
+        "salt to taste",
+        "1 1/4 c. flour and water to mix"
+      ],
+      "directions": [
+        "Cook the chicken in enough water to cover until tender.",
+        "Pick off bone, return chicken to broth.",
+        "Bring to a boil.",
+        "Thicken with flour mixture.",
+        "This amount depends on the thickness you want. Cook and stir well.",
+        "A few drops of yellow food coloring adds color.",
+        "Serve over biscuits or mashed potatoes."
+      ]
+    }
+  }
+}
