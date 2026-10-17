@@ -18,7 +18,7 @@ Each recipe is compared against the pantry one ingredient name at a time. Under 
 
 **Question 2: Which single ingredient would unlock the most new recipes if I bought it?**
 
-This is the Best Buys tab. The program collects every recipe that is missing exactly one non-seasoning ingredient, then counts how often each missing ingredient appears. The ingredient with the highest count is the best purchase. For my pantry, the top result was [ingredient], which would complete [N] recipes. The ranking showed me that a handful of common items account for a large share of the near misses.
+This is the Best Buys tab. The program collects every recipe that is missing exactly one non-seasoning ingredient, then counts how often each missing ingredient appears. The ingredient with the highest count is the best purchase. The ranking showed me that a handful of common items account for a large share of the near misses.
 
 Techniques used:
 
@@ -29,19 +29,29 @@ Techniques used:
 
 # Development Environment
 
-{Describe the tools that you used to develop the software}
 
-{Describe the programming language that you used and any libraries.}
+The program is in Python 3 and kept under version control with Git, hosted on GitHub. The interface uses tkinter, which ships with Python. To run it, install the libraries with `pip install pandas python-docx`, download `recipes_data.csv` from the Kaggle link above, and place it in the same folder as `pantry_pal.py`. Then start it with `python pantry_pal.py`. The program finds the CSV on its own. If the file is somewhere else, it asks for the location once and remembers it. Favorites and lists are saved to `library.json`, and the pantry is saved to `pantry.json`.
+
+Libraries used:
+
+* **pandas** to read the large CSV and drop incomplete rows
+* **tkinter and ttk** for the window, tabs, tables, and pantry editor
+* **threading and queue** so loading and searching happen in the background without freezing the window
+* **python-docx** to export recipes as Word documents
+* **json, re, functools, collections, and pathlib** from the standard library for parsing, text cleanup, caching, counting, saving data, and file paths
+
+The full dataset needs several gigabytes of memory, so the program loads the first 200,000 recipes by default. That limit is a single constant near the top of the file.
 
 # Useful Websites
 
-{Make a list of websites that you found helpful in this project}
-* [Web Site Name](http://url.link.goes.here)
-* [Web Site Name](http://url.link.goes.here)
+* [Recipe Dataset (over 2M) on Kaggle](https://www.kaggle.com/datasets/wilmerarltstrmberg/recipe-dataset-over-2m)
+* [pandas Documentation](https://pandas.pydata.org/docs/)
+* [10 Minutes to pandas](https://pandas.pydata.org/docs/user_guide/10min.html)
+* [Python tkinter Documentation](https://docs.python.org/3/library/tkinter.html)
+* [Python tkinter.ttk Documentation](https://docs.python.org/3/library/tkinter.ttk.html)
 
 # Future Work
 
-{Make a list of things that you need to fix, improve, and add in the future.}
-* Item 1
-* Item 2
-* Item 3
+* Recipe entry
+* Quantity fetching
+* Time needed for cooking
