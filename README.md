@@ -6,9 +6,7 @@ Thanks to a massive recipe database from Kaggle, I was able to get a baseline st
 
 If you have any feedback, I'd really appreciate it if you took the time to fill out my feedback survey [here.](https://docs.google.com/forms/d/e/1FAIpQLSfwoFzmMW6um5t2pzUnB7f0iB8C0iP2R_4OIiHqTUvzZG5W6A/viewform?usp=header)
 
-{Provide a link to your YouTube demonstration.  It should be a 4-5 minute demo of the data set, the questions and answers, the code running and a walkthrough of the code.}
-
-[Software Demo Video](http://youtube.link.goes.here)
+[Software Demo Video](https://youtu.be/LZTql5tP-KA)
 
 # Data Analysis Results
 
