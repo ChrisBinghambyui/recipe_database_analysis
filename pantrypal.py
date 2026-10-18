@@ -1,24 +1,23 @@
 """
-Pantry Pal: a pantry-driven recipe finder built on the RecipeNLG dataset.
+Pantry Pal
+Finds recipes you can make with what's in your pantry. Uses the RecipeNLG
+dataset from Kaggle:
+https://www.kaggle.com/datasets/wilmerarltstrmberg/recipe-dataset-over-2m
 
-Dataset: https://www.kaggle.com/datasets/wilmerarltstrmberg/recipe-dataset-over-2m
-Put recipes_data.csv (or full_dataset.csv) next to this script and it is found
-automatically. If it lives somewhere else, pick it once and the choice is remembered.
+Setup: put recipes_data.csv in the same folder as this file. If it's somewhere
+else, the program asks once and remembers where it is.
 
-What it does
-  * Search tab: filter recipes by title, "must contain" and "cannot contain".
-  * Pantry window: keep a saved list of what you have on hand.
-  * Use Pantry: sorts recipes into tabs by how close you are to making them:
-        Can Make Now, Seasonings Only, Buy 1 Item, Buy 2 Items
-    plus a Best Buys tab ranking which single ingredient would unlock the
-    most recipes (an aggregate count over the "Buy 1 Item" group).
-  * My Lists: favorite recipes or collect them into your own named lists. A
-    recipe can sit in as many lists as you like, like playlists.
-  * Any recipe can be opened in its own window and exported to Markdown (.md)
-    or Word (.docx), one recipe at a time or a whole list at once.
+What it does:
+  - Search recipes by title, must contain, and cannot contain
+  - Pantry list you can edit and save
+  - "Use Pantry" sorts recipes by how much you're missing (can make now,
+    only seasonings missing, buy 1 item, buy 2 items)
+  - Best Buys tab shows which single ingredient would unlock the most recipes
+  - Favorites and custom lists (a recipe can be in more than one list)
+  - Open recipes in their own window and export to .md or .docx
 
-Run:  pip install pandas python-docx   then   python pantry_pal.py
-(python-docx is only needed for Word export.)
+To run: pip install pandas python-docx, then python pantry_pal.py
+(python-docx is only needed for the Word export)
 """
 
 import json
@@ -34,30 +33,30 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import pandas as pd
 
-# ----------------------------------------------------------------------------
+# ----
 # Settings
-# ----------------------------------------------------------------------------
+# ----
 BASE_DIR = Path(__file__).resolve().parent
-DATASET_NAMES = ("recipes_data.csv", "full_dataset.csv")  # file names we look for
+DATASET_NAMES = ("recipes_data.csv", "full_dataset.csv")  # names to look for
 PANTRY_PATH = BASE_DIR / "pantry.json"
-LIBRARY_PATH = BASE_DIR / "library.json"    # favorites and custom lists
-SETTINGS_PATH = BASE_DIR / "settings.json"  # remembers where the dataset is
+LIBRARY_PATH = BASE_DIR / "library.json"    # favorites and lists
+SETTINGS_PATH = BASE_DIR / "settings.json"  # remembers where the csv is
 
-# The full CSV holds about 2.2 million recipes and needs several GB of RAM.
-# Raise this number, or set it to None, if your machine can handle more.
+# The full csv is ~2.2 million recipes and eats a ton of RAM, so we only load
+# the first chunk. Bump this up (or set to None) if your computer can take it.
 MAX_ROWS = 200_000
 
-RESULT_CAP = 500             # most rows shown per tab (keeps the GUI snappy)
-STAPLES = ("water", "salt")  # optionally assumed to be on hand
-FAVORITES = "Favorites"      # the built-in list that cannot be renamed or deleted
+RESULT_CAP = 500             # max rows shown per tab so the window stays fast
+STAPLES = ("water", "salt")  # can be assumed to be in everyone's kitchen
+FAVORITES = "Favorites"      # built-in list, can't be renamed or deleted
 
-# Words that carry no meaning when matching ingredient names.
+# words that don't usually matter when comparing ingredients
 FILLER_WORDS = {
     "fresh", "large", "small", "medium", "chopped", "diced", "minced",
     "sliced", "frozen", "optional", "finely", "freshly", "whole",
 }
 
-# Heuristic for "this is a seasoning, easy to borrow or skip".
+# seasonings are easy to borrow, substitute, or skip
 SEASONING_WORDS = {
     "salt", "pepper", "paprika", "cumin", "oregano", "basil", "thyme",
     "rosemary", "sage", "parsley", "cinnamon", "nutmeg", "cayenne",
@@ -65,15 +64,15 @@ SEASONING_WORDS = {
     "seasoning", "spice", "herb", "curry", "tarragon", "marjoram",
     "saffron", "mace", "vanilla", "chive",
 }
-# "bell pepper" contains "pepper" but is definitely not a seasoning.
+# "bell pepper" has "pepper" in it but it isn't a seasoning
 NOT_SEASONING_WORDS = {"bell", "jalapeno", "sauce", "sweet", "stuffed", "roasted"}
 
 
-# ----------------------------------------------------------------------------
-# Text helpers: turn messy ingredient names into comparable keys
-# ----------------------------------------------------------------------------
+# ----
+# Text helpers (cleaning up the ingredient names so they can be compared)
+# ----
 def singular(word):
-    """Very small plural stripper so 'tomatoes' and 'tomato' compare equal."""
+    """Basic plural remover so 'tomatoes' and 'tomato' match."""
     if len(word) > 3 and word.endswith("ies"):
         return word[:-3] + "y"
     if len(word) > 3 and word.endswith(("ches", "shes", "sses", "xes", "oes")):
@@ -85,7 +84,7 @@ def singular(word):
 
 @lru_cache(maxsize=None)
 def normalize(name):
-    """'Brown Sugars, chopped' -> 'brown sugar'. Cached because it runs millions of times."""
+    """'Onions, chopped' -> 'onion'. Cached since it runs a LOT."""
     words = re.findall(r"[a-z]+", name.lower())
     words = [singular(w) for w in words if w not in FILLER_WORDS]
     return " ".join(words)
@@ -93,13 +92,13 @@ def normalize(name):
 
 @lru_cache(maxsize=None)
 def is_seasoning(key):
-    """True if a normalized ingredient looks like a spice or herb."""
+    """Guesses if an ingredient is a spice or herb."""
     words = set(key.split())
     return bool(words & SEASONING_WORDS) and not (words & NOT_SEASONING_WORDS)
 
 
 def parse_list(text):
-    """The dataset stores lists as JSON text. Return [] if a row is malformed."""
+    """The csv stores lists as JSON text. Returns [] if the row is broken."""
     try:
         value = json.loads(text)
     except (ValueError, TypeError):
@@ -109,9 +108,9 @@ def parse_list(text):
 
 def build_url(link):
     """
-    Turn a dataset link into something a browser can open.
-    The CSV stores links without a scheme ('www.cookbooks.com/...'), and
-    cookbooks.com only resolves without the 'www.' prefix, so drop it for that site.
+    Makes a dataset link actually open in a browser. The csv has no https://
+    on its links, and cookbooks.com breaks if you keep the www. part because it's older, so that
+    gets removed for that site.
     """
     link = link.strip()
     if not link:
@@ -129,13 +128,13 @@ def split_terms(text):
 
 
 def safe_filename(name):
-    """Strip characters that are illegal in file names."""
+    """Removes characters that aren't allowed in file names."""
     return re.sub(r"[^\w\- ]+", "", name).strip()[:60] or "recipe"
 
 
-# ----------------------------------------------------------------------------
-# Settings file (remembers the dataset location so you only pick it once)
-# ----------------------------------------------------------------------------
+# ----
+# Settings file (so you only have to pick the csv once)
+# ----
 def load_settings():
     try:
         return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -148,7 +147,7 @@ def save_settings(settings):
 
 
 def find_dataset():
-    """Look for the CSV automatically: remembered path first, then known file names."""
+    """Tries the saved path first, then looks for the csv by name."""
     saved = load_settings().get("dataset_path")
     if saved and Path(saved).exists():
         return Path(saved)
@@ -160,12 +159,12 @@ def find_dataset():
     return None
 
 
-# ----------------------------------------------------------------------------
-# Export helpers (Markdown and Word)
-# A "recipe" everywhere below is a dict: id, title, link, ingredients, directions
-# ----------------------------------------------------------------------------
+# ----
+# Export stuff (Markdown and Word)
+# A "recipe" below is a dict with: id, title, link, ingredients, directions
+# ----
 def recipe_markdown(recipe, level=1):
-    """Render one recipe as Markdown. `level` is the heading depth of its title."""
+    """Turns one recipe into Markdown. level = how many # the title gets."""
     h = "#" * level
     lines = [f"{h} {recipe['title']}", ""]
     url = build_url(recipe["link"])
@@ -179,15 +178,15 @@ def recipe_markdown(recipe, level=1):
 
 
 def list_markdown(name, recipes):
-    """Render a whole list: one top heading, then every recipe beneath it."""
+    """Whole list as one Markdown file: list name on top, recipes under it."""
     parts = [f"# {name}\n"] + [recipe_markdown(r, level=2) for r in recipes]
     return "\n".join(parts)
 
 
 def write_docx(path, heading, recipes, whole_list):
     """
-    Write recipes to a Word file with python-docx (imported here so the rest of
-    the program works even if the package is not installed).
+    Saves recipes to a Word file using python-docx. The import is down here
+    so the rest of the program still works if it isn't installed.
     """
     try:
         from docx import Document
@@ -197,7 +196,7 @@ def write_docx(path, heading, recipes, whole_list):
     doc = Document()
     if whole_list:
         doc.add_heading(heading, 0)
-    recipe_level = 1 if whole_list else 0  # a single recipe uses the Title style
+    recipe_level = 1 if whole_list else 0  # single recipe uses the Title style
     for recipe in recipes:
         doc.add_heading(recipe["title"], recipe_level)
         url = build_url(recipe["link"])
@@ -207,25 +206,26 @@ def write_docx(path, heading, recipes, whole_list):
         for item in recipe["ingredients"]:
             doc.add_paragraph(item, style="List Bullet")
         doc.add_heading("Directions", recipe_level + 1)
-        # Numbers are typed by hand: Word's numbered style keeps counting across recipes.
+        # numbering the steps by hand, Word's numbered list doesn't restart
+        # between recipes
         for n, step in enumerate(recipe["directions"], start=1):
             doc.add_paragraph(f"{n}. {step}")
     doc.save(path)
 
 
-# ----------------------------------------------------------------------------
-# Library: favorites and custom lists, saved to library.json
-# ----------------------------------------------------------------------------
+# ----
+# Library (favorites and custom lists, saved in library.json)
+# ----
 class Library:
     """
-    Lists hold recipe ids; a separate table holds a full copy of each saved
-    recipe. Saving a copy means a list still works even if the recipe falls
-    outside the rows currently loaded from the CSV.
+    Each list only stores recipe ids. The actual recipe data is kept in one
+    separate dict, so a saved recipe still works even if it isn't in the rows
+    currently loaded from the csv.
     """
 
     def __init__(self, path):
         self.path = path
-        self.lists = {FAVORITES: []}  # list name -> [recipe ids], insertion ordered
+        self.lists = {FAVORITES: []}  # list name -> [recipe ids]
         self.recipes = {}             # recipe id -> recipe dict
         self.load()
 
@@ -238,7 +238,7 @@ class Library:
             return
         saved_lists = data.get("lists", {})
         self.recipes = data.get("recipes", {})
-        self.lists = {FAVORITES: list(saved_lists.get(FAVORITES, []))}  # always first
+        self.lists = {FAVORITES: list(saved_lists.get(FAVORITES, []))}  # keep Favorites first
         for name, ids in saved_lists.items():
             if name != FAVORITES:
                 self.lists[name] = list(ids)
@@ -261,7 +261,7 @@ class Library:
         self.forget_if_orphaned(rid)
 
     def forget_if_orphaned(self, rid):
-        """Drop the stored copy once no list refers to the recipe any more."""
+        """If no list uses the recipe anymore, delete its saved copy."""
         if not any(rid in ids for ids in self.lists.values()):
             self.recipes.pop(rid, None)
 
@@ -287,38 +287,38 @@ class Library:
         return [self.recipes[rid] for rid in self.lists[name] if rid in self.recipes]
 
 
-# ----------------------------------------------------------------------------
-# Recipe storage and matching logic (no GUI code in here)
-# ----------------------------------------------------------------------------
+# ----
+# Recipe data and matching (no GUI stuff in this part)
+# ----
 class RecipeStore:
-    """Holds every recipe plus an inverted index for fast ingredient lookups."""
+    """Holds all the recipes plus an index so ingredient lookups are fast."""
 
     def __init__(self):
         self.titles = []
         self.titles_lower = []
-        self.keys = []             # per recipe: tuple of normalized ingredient names
-        self.raw_ingredients = []  # per recipe: JSON text, parsed only when displayed
+        self.keys = []             # for each recipe: tuple of cleaned ingredient names
+        self.raw_ingredients = []  # JSON text, only parsed when a recipe is shown
         self.raw_directions = []
         self.links = []
-        self.vocab = {}            # ingredient key -> frozenset of its words
-        self.token_index = {}      # word -> set of ingredient keys containing it
+        self.vocab = {}            # ingredient name -> set of its words
+        self.token_index = {}      # word -> ingredient names that contain it
 
     def load(self, path, max_rows):
-        """Read the CSV with pandas, clean it, and build the lookup tables."""
+        """Reads the csv with pandas, cleans it up, and builds the lookups."""
         df = pd.read_csv(
             path,
             usecols=["title", "ingredients", "directions", "link", "NER"],
             nrows=max_rows,
         )
-        # Rows without a title or an ingredient-name list are useless to us.
+        # no title or no ingredient names = not useful, drop it
         df = df.dropna(subset=["title", "NER"])
 
         for row in df.itertuples(index=False):
             names = parse_list(row.NER)
-            keys = tuple(dict.fromkeys(  # dict.fromkeys removes duplicates, keeps order
+            keys = tuple(dict.fromkeys(  # removes duplicates but keeps the order
                 k for k in (normalize(n) for n in names if isinstance(n, str)) if k
             ))
-            if len(keys) < 2:  # one-ingredient "recipes" would flood the results
+            if len(keys) < 2:  # skip 1 ingredient "recipes", they flood the results
                 continue
             self.titles.append(str(row.title))
             self.titles_lower.append(str(row.title).lower())
@@ -334,14 +334,14 @@ class RecipeStore:
                         self.token_index.setdefault(word, set()).add(key)
 
     def recipe_id(self, i):
-        """Cheap stable id (the link, else the title) without parsing any JSON."""
+        """Id for a recipe: the link, or the title if there's no link."""
         return self.links[i] or self.titles[i]
 
     def recipe_at(self, i):
-        """Build the full recipe dict (parsing the JSON text) for one row."""
+        """Builds the full recipe dict for one row (this is where the JSON gets parsed)."""
         link = self.links[i]
         return {
-            "id": self.recipe_id(i),  # the link is unique per recipe
+            "id": self.recipe_id(i),  # links are unique per recipe
             "title": self.titles[i],
             "link": link,
             "ingredients": [str(x) for x in parse_list(self.raw_ingredients[i])],
@@ -349,7 +349,7 @@ class RecipeStore:
         }
 
     def keys_matching(self, term):
-        """All ingredient keys that contain every word of `term` ('chicken' -> 'chicken breast')."""
+        """Every ingredient containing all words of the term ('chicken' finds 'chicken breast')."""
         words = frozenset(normalize(term).split())
         if not words:
             return set()
@@ -357,11 +357,11 @@ class RecipeStore:
         return set.intersection(*sets) if sets[0] else set()
 
     def search(self, title, must, exclude):
-        """Return indexes of recipes passing the title / must / exclude filters."""
+        """Returns the indexes of recipes that pass the title/must/exclude filters."""
         if not (title or must or exclude):
             return list(range(len(self.keys)))
         must_sets = [self.keys_matching(t) for t in must]
-        if any(not s for s in must_sets):  # a required ingredient nobody uses
+        if any(not s for s in must_sets):  # nobody uses a required ingredient
             return []
         banned = set()
         for term in exclude:
@@ -379,11 +379,11 @@ class RecipeStore:
 
     def covered_keys(self, pantry_items, loose):
         """
-        Every ingredient key the pantry can satisfy.
-        Strict: a recipe ingredient is covered if all its words appear in one
-                pantry item ('olive oil' covers 'oil' and 'olive oil').
-        Loose:  additionally, a pantry item covers any longer ingredient that
-                contains it ('chicken' covers 'chicken breast').
+        Returns every ingredient the pantry covers.
+        Strict: all the words of a recipe ingredient have to be in one pantry
+                item ('olive oil' covers 'oil' and 'olive oil').
+        Loose:  also lets a pantry item cover longer ingredients that contain
+                it ('chicken' covers 'chicken breast').
         """
         covered = set()
         for item in pantry_items:
@@ -399,11 +399,11 @@ class RecipeStore:
         return covered
 
 
-# ----------------------------------------------------------------------------
-# GUI pieces
-# ----------------------------------------------------------------------------
+# ----
+# GUI
+# ----
 class PantryWindow(tk.Toplevel):
-    """Small editor window for the saved pantry list."""
+    """Little window for editing the pantry list."""
 
     def __init__(self, app):
         super().__init__(app)
@@ -456,15 +456,15 @@ class PantryWindow(tk.Toplevel):
 
 class ListPicker(tk.Toplevel):
     """
-    The "Save to..." popup. Tick or untick a list to add or remove the recipe
-    right away, or type a name to start a brand new list with it inside.
+    The "Save to list" popup. Checking or unchecking a list adds or removes
+    the recipe right away. You can also type a name to make a new list.
     """
 
     def __init__(self, app, recipe):
         super().__init__(app)
         self.app = app
         self.recipe = recipe
-        self.vars = []  # keep BooleanVars alive, tkinter drops unreferenced ones
+        self.vars = []  # have to keep these around or tkinter throws them out
         self.title("Save to list")
         self.transient(app)
         self.resizable(False, False)
@@ -485,7 +485,7 @@ class ListPicker(tk.Toplevel):
         self.new_entry.focus_set()
 
     def rebuild(self):
-        """Redraw one checkbox per list, ticked if the recipe is already in it."""
+        """Redraws the checkboxes (checked = recipe is already in that list)."""
         for widget in self.body.winfo_children():
             widget.destroy()
         self.vars = []
@@ -520,8 +520,8 @@ class ListPicker(tk.Toplevel):
 
 class RecipeView(ttk.Frame):
     """
-    A recipe display with its toolbar (favorite, save to list, pop out, export).
-    Used both in the main window's bottom pane and in pop-out recipe windows.
+    Shows a recipe with its buttons (favorite, save to list, pop out, export).
+    Used in the bottom of the main window and in the pop-out windows.
     """
 
     def __init__(self, parent, app, popout=True):
@@ -567,7 +567,7 @@ class RecipeView(ttk.Frame):
         self.refresh_buttons()
 
     def show(self, recipe, missing=()):
-        """Display a recipe dict. `missing` lists pantry gaps to highlight."""
+        """Displays a recipe. missing = pantry gaps to highlight in red."""
         self.recipe = recipe
         box = self.text
         box.config(state="normal")
@@ -590,7 +590,7 @@ class RecipeView(ttk.Frame):
         self.refresh_buttons()
 
     def refresh_buttons(self):
-        """Enable the toolbar only when a recipe is showing; keep the star in sync."""
+        """Buttons are disabled until a recipe is showing. Also updates the star."""
         state = "normal" if self.recipe else "disabled"
         for control in self.controls:
             control.config(state=state)
@@ -626,7 +626,7 @@ class RecipeView(ttk.Frame):
 
 
 class RecipeWindow(tk.Toplevel):
-    """A recipe in its own window. Open as many as you like side by side."""
+    """A recipe in its own window. You can have a bunch open at once."""
 
     def __init__(self, app, recipe, missing):
         super().__init__(app)
@@ -635,7 +635,7 @@ class RecipeWindow(tk.Toplevel):
         view = RecipeView(self, app, popout=False)
         view.pack(fill="both", expand=True, padx=8, pady=8)
         view.show(recipe, missing)
-        app.views.append(view)  # so the star and buttons stay in sync with the main window
+        app.views.append(view)  # keeps the favorite star synced with the main window
 
 
 class App(tk.Tk):
@@ -647,11 +647,11 @@ class App(tk.Tk):
         self.store = RecipeStore()
         self.library = Library(LIBRARY_PATH)
         self.ready = False
-        self.jobs = queue.Queue()      # worker threads drop results here
+        self.jobs = queue.Queue()      # background threads put their results here
         self.pantry = self.load_pantry()
         self.pantry_window = None
-        self.views = []                # every RecipeView that needs refreshing
-        self.last_missing = {}         # recipe id -> missing ingredient list
+        self.views = []                # all the RecipeViews that need updating
+        self.last_missing = {}         # recipe id -> what's missing from the pantry
 
         self.assume_staples = tk.BooleanVar(value=True)
         self.loose_matching = tk.BooleanVar(value=False)
@@ -664,7 +664,7 @@ class App(tk.Tk):
         self.after(100, self.poll_jobs)
         self.start_loading()
 
-    # ----- layout ----------------------------------------------------------
+    # ----- layout -----
     def build_filters(self):
         box = ttk.LabelFrame(self, text="Filters (apply to both Search and Use Pantry)")
         box.pack(fill="x", padx=8, pady=8)
@@ -705,7 +705,7 @@ class App(tk.Tk):
 
         recipe_cols = [("title", "Recipe", 430, False), ("ingredients", "Ingredients", 80, True),
                        ("missing", "Missing", 70, True), ("items", "Missing items", 330, False)]
-        self.tabs = {}  # key -> (frame, tree, base title)
+        self.tabs = {}  # key -> (frame, tree, tab title)
         self.add_tab("search", "Search Results", [recipe_cols[0], recipe_cols[1]])
         self.add_tab("can", "Can Make Now", recipe_cols)
         self.add_tab("season", "Only Seasonings Missing", recipe_cols)
@@ -715,7 +715,7 @@ class App(tk.Tk):
                                            ("ingredients", "Recipes it unlocks", 140, True)])
         self.build_lists_tab()
 
-        # Result tables: click shows the recipe below, double-click pops it out.
+        # click a row to see the recipe, double click to open it in a window
         for key, (_, tree, _) in self.tabs.items():
             if key != "best":
                 tree.bind("<<TreeviewSelect>>", lambda e, t=tree: self.on_select(t))
@@ -732,7 +732,7 @@ class App(tk.Tk):
         self.tabs[key] = (frame, tree, text)
 
     def make_tree(self, parent, columns):
-        """A scrollable table whose headings sort when clicked."""
+        """Makes a table with a scrollbar. Clicking a heading sorts it."""
         tree = ttk.Treeview(parent, columns=[c[0] for c in columns], show="headings", selectmode="browse")
         for col, heading, width, numeric in columns:
             tree.heading(col, text=heading, command=lambda c=col, t=tree: self.sort_by(t, c, False))
@@ -744,7 +744,7 @@ class App(tk.Tk):
         return tree
 
     def build_lists_tab(self):
-        """The My Lists tab: list names on the left, the chosen list's recipes on the right."""
+        """My Lists tab: list names on the left, recipes in that list on the right."""
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="My Lists")
 
@@ -753,7 +753,7 @@ class App(tk.Tk):
         self.list_box = tk.Listbox(left, exportselection=False, width=26)
         self.list_box.pack(fill="both", expand=True)
         self.list_box.bind("<<ListboxSelect>>", lambda e: self.show_selected_list())
-        self.list_names = []  # parallel to the listbox rows
+        self.list_names = []  # same order as the rows in the listbox
 
         buttons = ttk.Frame(left)
         buttons.pack(fill="x", pady=(6, 0))
@@ -778,7 +778,7 @@ class App(tk.Tk):
         ttk.Button(right, text="Remove from this list", command=self.remove_from_list).pack(anchor="e", pady=(6, 0))
         self.refresh_lists_tab()
 
-    # ----- small utilities ---------------------------------------------------
+    # ----- small utilities ------
     def load_pantry(self):
         if PANTRY_PATH.exists():
             try:
@@ -798,7 +798,7 @@ class App(tk.Tk):
             self.pantry_window = PantryWindow(self)
 
     def sort_by(self, tree, col, reverse):
-        """Click a column heading to sort by it; click again to flip the order."""
+        """Sorts a table by a column. Click again to flip the order."""
         rows = [(tree.set(i, col), i) for i in tree.get_children("")]
         try:
             rows.sort(key=lambda r: float(r[0]), reverse=reverse)
@@ -809,7 +809,7 @@ class App(tk.Tk):
         tree.heading(col, command=lambda: self.sort_by(tree, col, not reverse))
 
     def fill(self, key, rows, total=None):
-        """Replace a tab's contents. Each row is (iid, value1, value2, ...)."""
+        """Replaces a tab's rows. Each row looks like (iid, value1, value2, ...)."""
         frame, tree, base = self.tabs[key]
         tree.delete(*tree.get_children())
         for row in rows[:RESULT_CAP]:
@@ -817,13 +817,13 @@ class App(tk.Tk):
         shown_total = len(rows) if total is None else total
         self.notebook.tab(frame, text=f"{base} ({shown_total:,})")
 
-    # ----- background work ---------------------------------------------------
+    # ----- background work ------
     def run_async(self, work, done):
-        """Run `work` in a thread so the window never freezes; `done` runs on the GUI thread."""
+        """Runs work in a thread so the window doesn't freeze, then calls done on the main thread."""
         def target():
             try:
                 result = work()
-            except Exception as exc:  # hand the error to the GUI thread
+            except Exception as exc:  # pass the error back instead of crashing the thread
                 result = exc
             self.jobs.put((done, result))
         threading.Thread(target=target, daemon=True).start()
@@ -838,7 +838,7 @@ class App(tk.Tk):
         self.after(100, self.poll_jobs)
 
     def start_loading(self):
-        path = find_dataset()  # no prompt when the CSV is where we expect it
+        path = find_dataset()  # only asks if it can't find the csv
         if path is None:
             picked = filedialog.askopenfilename(title="Select recipes_data.csv",
                                                 filetypes=[("CSV files", "*.csv")])
@@ -847,7 +847,7 @@ class App(tk.Tk):
                 return
             path = Path(picked)
             settings = load_settings()
-            settings["dataset_path"] = str(path)  # remember it for next launch
+            settings["dataset_path"] = str(path)  # save it so it doesn't ask again
             save_settings(settings)
         self.set_busy(True)
         self.status.set(f"Loading up to {MAX_ROWS or 'all'} recipes from {path.name}... this can take a minute.")
@@ -868,7 +868,7 @@ class App(tk.Tk):
         self.search_btn.config(state=state)
         self.pantry_btn.config(state=state)
 
-    # ----- searching -----------------------------------------------------------
+    # ----- searching --------------
     def read_filters(self):
         return (self.title_var.get().strip().lower(),
                 split_terms(self.must_var.get()),
@@ -906,17 +906,17 @@ class App(tk.Tk):
         self.run_async(lambda: self.scan_pantry(title, must, exclude, items, loose), self.on_scan_done)
 
     def scan_pantry(self, title, must, exclude, items, loose):
-        """Bucket recipes by what is missing from the pantry. Runs in a worker thread."""
+        """Sorts recipes into buckets based on what's missing. Runs in a background thread."""
         store = self.store
         covered = store.covered_keys(items, loose)
         buckets = {"can": [], "season": [], "buy1": [], "buy2": []}
-        unlock_counts = Counter()  # ingredient -> how many "Buy 1" recipes it would complete
+        unlock_counts = Counter()  # ingredient -> how many "Buy 1" recipes it would finish
         missing_lookup = {}
 
         for i in store.search(title, must, exclude):
             keys = store.keys[i]
             missing = [k for k in keys if k not in covered]
-            if len(missing) > 5:  # hopeless, skip early
+            if len(missing) > 5:  # too much missing, skip it
                 continue
             seasonings = [k for k in missing if is_seasoning(k)]
             others = [k for k in missing if not is_seasoning(k)]
@@ -935,7 +935,7 @@ class App(tk.Tk):
             buckets[bucket].append((i, len(keys), len(missing)))
             missing_lookup[i] = missing
 
-        # Fewest missing first, then the more elaborate recipes first.
+        # least missing first, then recipes with more ingredients
         for rows in buckets.values():
             rows.sort(key=lambda r: (r[2], -r[1]))
         return buckets, unlock_counts, missing_lookup
@@ -946,7 +946,7 @@ class App(tk.Tk):
             self.status.set(f"Pantry search failed: {result}")
             return
         buckets, unlock_counts, by_index = result
-        # Key the missing lists by recipe id so saved and pop-out views can find them.
+        # store by recipe id so saved recipes and pop-out windows can find it too
         self.last_missing = {self.store.recipe_id(i): m for i, m in by_index.items()}
         for key, rows in buckets.items():
             table = [(i, self.store.titles[i], n, m, ", ".join(by_index[i])) for i, n, m in rows]
@@ -956,7 +956,7 @@ class App(tk.Tk):
         self.notebook.select(self.tabs["can"][0])
         self.status.set(f"Pantry scan done: {len(buckets['can']):,} recipes you can make right now.")
 
-    # ----- showing and opening recipes -------------------------------------
+    # ----- showing and opening recipes ----------
     def on_select(self, tree):
         selection = tree.selection()
         if selection:
@@ -980,9 +980,9 @@ class App(tk.Tk):
     def open_recipe_window(self, recipe, missing):
         RecipeWindow(self, recipe, missing)
 
-    # ----- favorites and lists ---------------------------------------------
+    # ----- favorites and lists ------------------
     def library_changed(self):
-        """Call after any change to the library so every open view and tab catches up."""
+        """Call this after changing a list so all the open views and tabs update."""
         self.views = [v for v in self.views if v.winfo_exists()]
         for view in self.views:
             view.refresh_buttons()
@@ -1053,7 +1053,7 @@ class App(tk.Tk):
             self.library.save()
             self.library_changed()
 
-    # ----- exporting -------------------------------------------------------
+    # ----- exporting ----------
     def export_current_list(self, kind):
         name = self.selected_list()
         if name is None:
@@ -1062,7 +1062,7 @@ class App(tk.Tk):
         self.export(self.library.recipes_in(name), name, kind, whole_list=True)
 
     def export(self, recipes, heading, kind, whole_list):
-        """Ask where to save, then write the recipes as Markdown ('md') or Word ('docx')."""
+        """Asks where to save, then writes the recipes as Markdown ('md') or Word ('docx')."""
         if not recipes:
             messagebox.showinfo("Export", "There is nothing to export yet.")
             return
